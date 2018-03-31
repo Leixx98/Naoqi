@@ -1,0 +1,1743 @@
+#include <conio.h>
+#include <Windows.h>
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <Eigen/Dense>
+#include <opencv2/opencv.hpp>
+#include <Windows.h>
+#include <Kinect.h>
+#include <time.h>
+#include <alerror/alerror.h>
+#include <alproxies/almotionproxy.h>
+#include <alerror/alerror.h>
+#include <alproxies/altexttospeechproxy.h>
+#include <alproxies/almotionproxy.h>
+#include <alproxies/alrobotpostureproxy.h>
+#include <qi/os.hpp>
+#define SafeRelease(pObject) if( pObject != NULL ) {pObject->Release(); pObject=NULL;}
+using namespace std;
+using namespace cv;
+using namespace Eigen;
+using Eigen::MatrixXd;
+const double pi = 3.14159265358979323846;
+// *********************************nao robot****************************************//
+const float ShoulderToElbowLength = 105.00 ;
+const float ElbowToWristLength = 55.95;
+const float WristToHandLength = 57.75;
+float LShouldToWrist[3] ={0,0,0};
+float LShouldToHand[3] ={0,0,0};
+float LShouldToElbow[3] ={0,0,0};
+float LElbowToWrist[3] = {0,0,0};
+float LWristToHand[3] ={0,0,0};
+float LWristToThumb[3] ={0,0,0};
+float RShouldToWrist[3] ={0,0,0};
+float RShouldToElbow[3] ={0,0,0};
+float RElbowToWrist[3] = {0,0,0};
+float resultPosition[3] = {0,0,0};
+double vertical[3]={0,0,0};
+double LVertical[3]={0,0,0};
+float l1 = 0.015;
+float l2 = 0.105;
+float l3 = 0.055;
+float l4 = 0.0;
+const float FrameError = 0.03;
+const float FrameMaxError = 3.0;
+bool DEBUGE = false;
+String connectNao= "127.0.0.1" ;
+//数据分析流
+bool DATAVIEW = false;
+ofstream ocout;
+ofstream ocout1;
+AL::ALMotionProxy motion(connectNao, 9559);
+double HAngle0 = 0.0;
+double HAngle1 = 0.0;
+double HAngle2 = 0.0;
+double HAngle3 = 0.0;
+float angle0,angle1,angle2,angle3,angle4,angle5,angle6,angle7,angle8,angle9,angle10;
+//commandAngles[1.44242, 0.223037, -1.20182, -0.418269, 0.3, 1.44262, -0.22326, 1.20182, 0.418131, 0.3]
+double LShoulderPitchResult = 1.44242 ,LShoulderRollResult =0.223037,LElboYawResult = -1.20182,LElbowRollResult =-0.418269,LHand = 0.3;
+double RShoulderPitchResult = 1.44262 ,RShoulderRollResult = -0.22326,RElboYawResult =  1.20182,RElbowRollResult = 0.418131,RHand =  0.3;
+double LWristYaw =0,RWristYaw;
+double LAngleForThumbToHand;
+Vector3d fkine(vector<float> commandAngles);
+bool NewtonIK = true;
+Matrix3d unit = Matrix3d::Identity(3,3);
+bool transfer;
+double returnIncludeAngle(double *vector1,double *vector2);
+struct DHMatrix{
+	float jointAngle;
+	float linkOffset;
+	float linkLenth;
+	float linkTwist;
+	Matrix4d Transformation;
+	Matrix4d RotzAngle;
+	Matrix4d TranszLenth;
+	Matrix4d TransxAngle;
+	Matrix4d RotxAngle;
+	void setDHParam(float jointAngleFlag,float linkOffsetFlag,float linkLenthFlag,float linkTwistFlag ){
+		jointAngle = jointAngleFlag;
+		linkOffset = linkOffsetFlag;
+		linkLenth = linkLenthFlag;
+		linkTwist = linkTwistFlag;
+	}
+	Matrix4d setTransformation(){
+		RotzAngle(0,0) = cos(jointAngle);
+		RotzAngle(0,1) = -sin(jointAngle);
+		RotzAngle(0,2) = 0;
+		RotzAngle(0,3) = 0;
+		RotzAngle(1,0) = sin(jointAngle);
+		RotzAngle(1,1) = cos(jointAngle);
+		RotzAngle(1,2) = 0;
+		RotzAngle(1,3) = 0;
+		RotzAngle(2,0) = 0;
+		RotzAngle(2,1) = 0;
+		RotzAngle(2,2) = 1;
+		RotzAngle(2,3) = 0;
+		RotzAngle(3,0) = 0;
+		RotzAngle(3,1) = 0;
+		RotzAngle(3,2) = 0;
+		RotzAngle(3,3) = 1;
+
+		TranszLenth(0,0) = 1;
+		TranszLenth(0,1) = 0;
+		TranszLenth(0,2) = 0;
+		TranszLenth(0,3) = 0;
+		TranszLenth(1,0) = 0;
+		TranszLenth(1,1) = 1;
+		TranszLenth(1,2) = 0;
+		TranszLenth(1,3) = 0;
+		TranszLenth(2,0) = 0;
+		TranszLenth(2,1) = 0;
+		TranszLenth(2,2) = 1;
+		TranszLenth(2,3) = linkOffset;
+		TranszLenth(3,0) = 0;
+		TranszLenth(3,1) = 0;
+		TranszLenth(3,2) = 0;
+		TranszLenth(3,3) = 1;
+
+		TransxAngle(0,0) = 1;
+		TransxAngle(0,1) = 0;
+		TransxAngle(0,2) = 0;
+		TransxAngle(0,3) = linkLenth;
+		TransxAngle(1,0) = 0;
+		TransxAngle(1,1) = 1;
+		TransxAngle(1,2) = 0;
+		TransxAngle(1,3) = 0;
+		TransxAngle(2,0) = 0;
+		TransxAngle(2,1) = 0;
+		TransxAngle(2,2) = 1;
+		TransxAngle(2,3) = 0;
+		TransxAngle(3,0) = 0;
+		TransxAngle(3,1) = 0;
+		TransxAngle(3,2) = 0;
+		TransxAngle(3,3) = 1;
+
+		RotxAngle(0,0) = 1;
+		RotxAngle(0,1) = 0;
+		RotxAngle(0,2) = 0;
+		RotxAngle(0,3) = 0;
+		RotxAngle(1,0) = 0;
+		RotxAngle(1,1) = cos(linkTwist);
+		RotxAngle(1,2) = -sin(linkTwist);
+		RotxAngle(1,3) = 0;
+		RotxAngle(2,0) = 0;
+		RotxAngle(2,1) = sin(linkTwist);
+		RotxAngle(2,2) = cos(linkTwist);
+		RotxAngle(2,3) = 0;
+		RotxAngle(3,0) = 0;
+		RotxAngle(3,1) = 0;
+		RotxAngle(3,2) = 0;
+		RotxAngle(3,3) = 1;
+		Transformation = RotzAngle * TranszLenth *TransxAngle*RotxAngle;
+		return Transformation;
+	}
+};
+
+
+
+// ************************************动力学雅可比矩阵****************************** //
+
+
+double round(double r)  
+{  
+    return (r > 0.0) ? floor(r + 0.5) : ceil(r - 0.5);  
+}  
+double conventAngle(double angleTemp){
+	
+	double temp = angleTemp / 2 / pi;
+	temp = round(temp);
+	double angleChange = angleTemp - temp * 2 * pi; 
+	return angleChange;
+}
+void testconventAngle(){
+	double ceshi1 = 1.7865;
+	cout << "conventAngle" <<conventAngle(1.7865)<<endl;
+	cout << sin(ceshi1) << "=="<<sin(conventAngle(1.7865))<< endl;
+	
+	 ceshi1 = -1.7865;
+	cout << "conventAngle" <<conventAngle(-1.7865)<<endl;
+	cout << sin(ceshi1) << "=="<<sin(conventAngle(-1.7865))<< endl;
+
+
+}
+
+MatrixXd getLeftHandJacobian(float Angle0,float Angle1,float Angle2,float Angle3){
+	MatrixXd jacobian(3,4);
+	jacobian(0,0) = l3*cos(Angle0)*sin(Angle2)*sin(Angle3) +\
+		l3*sin(Angle0)*sin(Angle1)*cos(Angle2)*sin(Angle3) -\
+		l3*cos(Angle3)*sin(Angle0)*cos(Angle1) - l2*cos(Angle1)*sin(Angle0) + l1*sin(Angle0)*sin(Angle1);
+	jacobian(0,1) = -l3*cos(Angle0)*cos(Angle1)*cos(Angle2)*sin(Angle3) -l3*cos(Angle3)*cos(Angle0)\
+		*sin(Angle1) - l2*cos(Angle0)*sin(Angle1)-l1*cos(Angle0)*cos(Angle1);
+	jacobian(0,2) = l3*sin(Angle0)*cos(Angle2)*sin(Angle3) + l3*cos(Angle0)*sin(Angle1)*sin(Angle2)*sin(Angle3);
+	jacobian(0,3) = l3*sin(Angle0)*sin(Angle2)*cos(Angle3) -l3 *cos(Angle0)*sin(Angle1)*cos(Angle2)*cos(Angle3)\
+		-l3*cos(Angle1)*cos(Angle0)*sin(Angle3);
+	jacobian(1,0) = -l3*cos(Angle0)*sin(Angle1)*cos(Angle2)*sin(Angle3)+l3*sin(Angle0)*cos(Angle2)*sin(Angle3)\
+		+l3*cos(Angle0)*cos(Angle1)*cos(Angle3);
+	jacobian(1,1) = -l3*sin(Angle0)*cos(Angle1)*cos(Angle2)*sin(Angle3) - l3*sin(Angle0)*sin(Angle1)*cos(Angle3)-\
+		l2*sin(Angle0)*sin(Angle1) -l1*sin(Angle0)*cos(Angle1);
+	jacobian(1,2) = l3*sin(Angle0)*sin(Angle1)*sin(Angle2)*sin(Angle3)-l3*cos(Angle0)*cos(Angle2)*sin(Angle3);
+	jacobian(1,3) = -l3*sin(Angle0)*sin(Angle1)*cos(Angle2)*cos(Angle3)\
+		-l3*cos(Angle0)*sin(Angle2)*cos(Angle3)-l3*sin(Angle0)*cos(Angle1)*sin(Angle3);
+
+	jacobian(1,0) = -jacobian(1,0);
+	jacobian(1,1) = -jacobian(1,1);
+	jacobian(1,2) = -jacobian(1,2);
+	jacobian(1,3) = -jacobian(1,3);
+
+	jacobian(2,0) = 0;
+	jacobian(2,1) = -l3*sin(Angle1)*cos(Angle2)*sin(Angle3) + l3*cos(Angle1)*cos(Angle3)+l2*cos(Angle1)-l1*sin(Angle1);
+	jacobian(2,2) = -l3*cos(Angle1)*sin(Angle2)*sin(Angle3);
+	jacobian(2,3) = l3*cos(Angle1)*cos(Angle2)*cos(Angle3) -l3*sin(Angle1)*sin(Angle3);
+	//cout <<"jacobian:"<<jacobian<<endl;
+	return jacobian;
+}
+//******************************************角度限制************************************//
+//*  -2.0857 <= angle0 <= 2.0857
+//*	 -0.3142 <= angle1 <= 1.3265
+//*  -2.0857 <= angle2 <= 2.0857
+//*  -1.5446 <= angle3 <= -0.0349
+double setHangle(float AngleMax,float AngleMin, float inputAngle){
+	double Hangle = (AngleMax - AngleMin)*(AngleMax - AngleMin)*(2*inputAngle-AngleMax-AngleMin)/(4*(AngleMax-inputAngle)*(AngleMax-inputAngle)*(inputAngle-AngleMin)*(inputAngle-AngleMin));
+	Hangle = abs(Hangle);
+	return Hangle;
+}
+Matrix4d getWeightMatrix(vector<float> currentAngle){
+	Matrix4d WeightMatrix;
+	double w0;
+	double w1;
+	double w2;
+	double w3;
+	double HAngle0Flag =setHangle(2.0857,-2.0857,currentAngle[0]);
+	double HAngle1Flag =setHangle(1.3265,-0.3142,currentAngle[1]);
+	double HAngle2Flag =setHangle( 2.0857,-2.0857,currentAngle[2]);
+	double HAngle3Flag =setHangle(-0.0349,-1.5446,currentAngle[3]);
+	if(HAngle0Flag >= HAngle0){
+		w0 = 1 + HAngle0Flag;
+	}else{
+		w0 = 1;
+	}
+	if(HAngle1Flag >= HAngle1){
+		w1 = 1 + HAngle1Flag ;
+	}else{
+		w1 = 1;
+	}
+	if(HAngle2Flag >= HAngle2){
+		w2 = 1 + HAngle2Flag ;
+	}else{
+		w2 = 1;
+	}
+	if(HAngle3Flag >= HAngle3){
+		w3 = 1 + HAngle3Flag;
+	}else{
+		w3 = 1;
+	}
+	HAngle0 = setHangle(2.0857,-2.0857,currentAngle[0]);
+	HAngle1 = setHangle(1.3265,-0.3142,currentAngle[1]);
+	HAngle2 = setHangle( 2.0857,-2.0857,currentAngle[2]);
+	HAngle3 = setHangle(-0.0349,-1.5446,currentAngle[3]);
+
+	WeightMatrix(0,0) =w0;
+	WeightMatrix(0,1) =0;
+	WeightMatrix(0,2) =0;
+	WeightMatrix(0,3) =0;
+	WeightMatrix(1,0) =0;
+	WeightMatrix(1,1) =w1;
+	WeightMatrix(1,2) =0;
+	WeightMatrix(1,3) =0;
+	WeightMatrix(2,0) =0;
+	WeightMatrix(2,1) =0;
+	WeightMatrix(2,2) =w2;
+	WeightMatrix(2,3) =0;
+	WeightMatrix(3,0) =0;
+	WeightMatrix(3,1) =0;
+	WeightMatrix(3,2) =0;
+	WeightMatrix(3,3) =w3;
+
+	//cout <<"WeightMatrix:"<<WeightMatrix<<endl;
+	return WeightMatrix;
+}
+//*************************逆运动学算法用牛顿跌打法求解*************************//
+Vector4d ikine(vector<float> tagertPos){
+	double targetX;
+	double targetY;
+	double targetZ;
+	double currentX;
+	double currentY;
+	double currentZ;
+	Vector3d temp1;
+	int temp ;
+	int space = 0;
+	int loopNumber = 1000;
+	double e_pos = 0.00001;
+	bool useSensorValues = false;
+	MatrixXd jacobian(3,4);
+	Matrix4d WeightMatrix;
+	AL::ALValue names       = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll");
+	bool useSensors   = false;
+	std::vector<float> commandAngles = motion.getAngles(names, useSensors);//得到当前角度
+	//cout << "commandAngles：" <<commandAngles << endl;
+	temp1 = fkine(commandAngles);//得到当前位置
+
+	std::string name1 = "LWristYaw";
+	std::vector<float> result = motion.getPosition(name1, space, useSensorValues);
+	//std::cout << name1 << ":" << std::endl;
+
+	//std::cout << "currentPosition (x, y, z): " << result.at(0) << ", " << result.at(2) - 0.1<< ", " << result.at(1) -0.098 << std::endl;
+//	cout <<"temp1" <<endl<<temp1<<endl;
+	currentX =  temp1(0);
+	currentY =  temp1(1);
+	currentZ =  temp1(2);
+	//设置目标位置
+	targetX = tagertPos[0];
+	targetY = tagertPos[1];
+	targetZ = tagertPos[2];
+
+	//std::cout << "targetPosition (x, y, z): " << targetX << ", " << targetY<< ", " << targetZ << std::endl;
+	//cin>>temp;
+	//进入迭代部分
+	Vector3d changeX ;
+	Vector3d targetPosition;
+	Vector3d currentPosition;
+	Vector4d changeAngle ;
+	Vector4d currentAngle;
+	currentAngle(0) = commandAngles[0];
+	currentAngle(1) = commandAngles[1];
+	currentAngle(2) = commandAngles[2];
+	currentAngle(3) = commandAngles[3];
+	
+	targetPosition(0) = targetX;
+	targetPosition(1) = targetY;
+	targetPosition(2) = targetZ;
+
+	currentPosition(0) = currentX;
+	currentPosition(1) = currentY;
+	currentPosition(2) = currentZ;
+	for(int loop = 0;loop < 500;loop++){
+		changeX = targetPosition - currentPosition ;
+	/*	cout << "changeX" << endl << changeX << endl;
+		cout << "currentAngle" << endl << currentAngle << endl;*/
+		//根据当前角度设置雅可比矩阵和权重矩阵
+		jacobian = getLeftHandJacobian(currentAngle(0),currentAngle(1),currentAngle(2),currentAngle(3));
+		commandAngles[0] = currentAngle(0);
+		commandAngles[1] = currentAngle(1);
+		commandAngles[2] = currentAngle(2);
+		commandAngles[3] = currentAngle(3);
+		WeightMatrix = getWeightMatrix(commandAngles);
+		/*cout <<"WeightMatrix" << endl<< WeightMatrix<<endl;
+		cout << "jacobian" << endl<< jacobian<<endl;*/
+		//cout << "changeX" << endl<< changeX<<endl;
+		//得到相应的微分角度
+		changeAngle = WeightMatrix.inverse()*jacobian.transpose()*(jacobian*WeightMatrix.inverse()*jacobian.transpose()).inverse()*changeX;
+		///changeAngle = jacobian.transpose()*(jacobian*jacobian.transpose()).inverse()*changeX;
+		//cout << "changeAngle" << endl << changeAngle << endl;
+		double epos = sqrt(changeAngle(0)*changeAngle(0) + changeAngle(1)*changeAngle(1) + changeAngle(2)*changeAngle(2));
+		if(epos < e_pos){
+			transfer = true;
+			cout << "****************************************************************" << endl;
+			cout <<"commandAngles"<<commandAngles<< endl;
+			cout <<"WeightMatrix"<<endl<<WeightMatrix<< endl;
+			cout <<"targetPosition"<<targetPosition<< endl;
+			double errorTemp;
+			Vector3d error3D = targetPosition - currentPosition;
+			currentPosition = fkine(commandAngles);
+			cout <<"epos" <<epos <<"<<<"<<e_pos<<endl;
+			cout <<"currentAngle" <<currentAngle <<endl;
+			cout << "currentPosition" << currentPosition <<endl;
+			cout << "error"<<targetPosition - currentPosition<< endl;
+			errorTemp = sqrt(error3D(0)*error3D(0) + error3D(1)*error3D(1) + error3D(2)*error3D(2));
+			cout << "errorTemp" << errorTemp << endl;
+			if(errorTemp > 0.01){
+				system("pause");
+			}
+			break;
+		}
+		if(loop ==499){
+			transfer =false;
+			cout << "****************************************************************" << endl;
+			cout <<"WeightMatrix"<< endl <<WeightMatrix<< endl;
+			cout <<"targetPosition"<<targetPosition<< endl;
+			double errorTemp;
+			Vector3d error3D = targetPosition - currentPosition;
+			currentPosition = fkine(commandAngles);
+			cout <<"commandAngles"<<commandAngles<< endl;
+			cout <<"epos" <<epos <<"<<<"<<e_pos<<endl;
+			cout <<"currentAngle" <<currentAngle <<endl;
+			cout << "currentPosition" << currentPosition <<endl;
+			cout << "error"<<targetPosition - currentPosition<< endl;
+			errorTemp = sqrt(error3D(0)*error3D(0) + error3D(1)*error3D(1) + error3D(2)*error3D(2));
+			cout << "errorTemp" << errorTemp << endl;
+			if(errorTemp > 0.01){
+				system("pause");
+			}
+		}
+		//更新当前角度
+		currentAngle = currentAngle + changeAngle;
+		commandAngles[0] = currentAngle(0);
+		commandAngles[1] = currentAngle(1);
+		commandAngles[2] = currentAngle(2);
+		commandAngles[3] = currentAngle(3);
+		//根据前向运动学求Xnew
+		currentPosition = fkine(commandAngles);
+	}	
+	DEBUGE =true;
+	if(DEBUGE){
+		currentPosition = fkine(commandAngles);
+		cout <<"currentAngle" <<currentAngle <<endl;
+		cout << "currentPosition" << currentPosition <<endl;
+		cout << "error"<<targetPosition - currentPosition<< endl;
+	}
+	currentAngle(0) = conventAngle(currentAngle(0));
+	currentAngle(1) = conventAngle(currentAngle(1));
+	currentAngle(2) = conventAngle(currentAngle(2));
+	currentAngle(3) = conventAngle(currentAngle(3));
+	/*cout << "currentAngle" <<currentAngle << endl;
+	cout << "currentPosition"<< currentPosition<<endl;*/
+	return currentAngle;
+}
+
+//*************************逆运动学测试**********************//
+//*********************anglechange =  inv(W)*j'*inv([j*inv(W)*j'])*changeX 
+void ikineTest(){
+	double targetX;
+	double targetY;
+	double targetZ;
+	double currentX;
+	double currentY;
+	double currentZ;
+	Vector3d temp1;
+	int temp ;
+	int space = 0;
+	int loopNumber = 1000;
+	double e_pos = 0.00001;
+	bool useSensorValues = false;
+	MatrixXd jacobian(3,4);
+	Matrix4d WeightMatrix;
+	AL::ALValue names       = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll");
+	bool useSensors   = false;
+	std::vector<float> commandAngles = motion.getAngles(names, useSensors);//得到当前角度
+	cout << "commandAngles：" <<commandAngles << endl;
+	temp1 = fkine(commandAngles);//得到当前位置
+
+	std::string name1 = "LWristYaw";
+	std::vector<float> result = motion.getPosition(name1, space, useSensorValues);
+	std::cout << name1 << ":" << std::endl;
+
+	std::cout << "currentPosition (x, y, z): " << result.at(0) << ", " << result.at(2) - 0.1<< ", " << result.at(1) -0.098 << std::endl;
+	cout <<"temp1" <<endl<<temp1<<endl;
+	currentX =  temp1(0);
+	currentY =  temp1(1);
+	currentZ =  temp1(2);
+	//设置目标位置
+	targetX = 0.00976838;
+	targetY = -0.0294509;
+	targetZ = -0.155502;
+
+	std::cout << "targetPosition (x, y, z): " << targetX << ", " << targetY<< ", " << targetZ << std::endl;
+
+	//cin>>temp;
+//进入迭代部分
+	Vector3d changeX ;
+	Vector3d targetPosition;
+	Vector3d currentPosition;
+	Vector4d changeAngle ;
+	Vector4d currentAngle;
+	currentAngle(0) = commandAngles[0];
+	currentAngle(1) = commandAngles[1];
+	currentAngle(2) = commandAngles[2];
+	currentAngle(3) = commandAngles[3];
+	targetPosition(0) = targetX;
+	targetPosition(1) = targetY;
+	targetPosition(2) = targetZ;
+	currentPosition(0) = currentX;
+	currentPosition(1) = currentY;
+	currentPosition(2) = currentZ;
+	for(int loop = 0;loop < loopNumber;loop++){
+		changeX = targetPosition - currentPosition ;
+	/*	cout << "changeX" << endl << changeX << endl;
+		cout << "currentAngle" << endl << currentAngle << endl;*/
+		//根据当前角度设置雅可比矩阵和权重矩阵
+		jacobian = getLeftHandJacobian(currentAngle(0),currentAngle(1),currentAngle(2),currentAngle(3));
+		commandAngles[0] = currentAngle(0);
+		commandAngles[1] = currentAngle(1);
+		commandAngles[2] = currentAngle(2);
+		commandAngles[3] = currentAngle(3);
+		WeightMatrix = getWeightMatrix(commandAngles);
+		/*cout <<"WeightMatrix" << endl<< WeightMatrix<<endl;
+		cout << "jacobian" << endl<< jacobian<<endl;*/
+		//cout << "changeX" << endl<< changeX<<endl;
+		//得到相应的微分角度
+		changeAngle = WeightMatrix.inverse()*jacobian.transpose()*(jacobian*WeightMatrix.inverse()*jacobian.transpose()).inverse()*changeX;
+		//changeAngle = jacobian.transpose()*(jacobian*jacobian.transpose()).inverse()*changeX;
+		//cout << "changeAngle" << endl << changeAngle << endl;
+		double epos = sqrt(changeAngle(0)*changeAngle(0) + changeAngle(1)*changeAngle(1) + changeAngle(2)*changeAngle(2));
+		if(epos < e_pos){
+			break;
+		}
+		//更新当前角度
+		currentAngle = currentAngle + changeAngle;
+		commandAngles[0] = currentAngle(0);
+		commandAngles[1] = currentAngle(1);
+		commandAngles[2] = currentAngle(2);
+		commandAngles[3] = currentAngle(3);
+		//根据前向运动学求Xnew
+		currentPosition = fkine(commandAngles);
+	}
+
+
+	
+	currentAngle(0) = conventAngle(currentAngle(0));
+	currentAngle(1) = conventAngle(currentAngle(1));
+	currentAngle(2) = conventAngle(currentAngle(2));
+	currentAngle(3) = conventAngle(currentAngle(3));
+	cout << "currentAngle" <<currentAngle << endl;
+	cout << "currentPosition"<< currentPosition<<endl;
+
+	// AL::ALValue names       = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll","RShoulderPitch", "RShoulderRoll","RElbowYaw","RElbowRoll");
+	AL::ALValue angles      = AL::ALValue::array(currentAngle(0),currentAngle(1) ,currentAngle(2),currentAngle(3));
+	cout << "angles:" << angles << endl;
+	fkine(angles);
+	cin>>temp;
+
+	float fractionMaxSpeed  = 0.1f;
+	motion.setStiffnesses(names, AL::ALValue::array(1.0f,1.0f,1.0f,1.0f));
+	qi::os::sleep(1.0f);
+	motion.setAngles(names, angles, fractionMaxSpeed);
+	cin>>temp;
+	result = motion.getPosition(name1, space, useSensorValues);
+	std::cout << name1 << ":" << std::endl;
+	std::cout << "Position (x, y, z): " << result.at(0) << ", " << result.at(2) - 0.1<< ", " << result.at(1) -0.098 << std::endl;
+	system("pause");
+}
+/**
+* 函数描述
+* @author Administrator
+* @Time 2017-05-10 16:27:01
+* @param 各个关节角度
+* @return 末端位置 
+*/
+Vector3d fkine(vector<float> commandAngles){
+	DHMatrix dHMatrix0to1;
+	Matrix4d dh0to1;
+	dHMatrix0to1.setDHParam(commandAngles[0],0.0,0.0,pi / 2);
+	dh0to1 = dHMatrix0to1.setTransformation();
+
+	DHMatrix dHMatrix1to2;
+	Matrix4d dh1to2;
+	dHMatrix1to2.setDHParam(commandAngles[1] + pi /2 ,0.0,l1,pi / 2);
+	dh1to2 = dHMatrix1to2.setTransformation();
+
+	DHMatrix dHMatrix2to3;
+	Matrix4d dh2to3;
+	dHMatrix2to3.setDHParam(commandAngles[2] + pi ,l2,0.0,pi / 2);
+	dh2to3 = dHMatrix2to3.setTransformation();
+	
+	DHMatrix dHMatrix3to4;
+	Matrix4d dh3to4;
+	dHMatrix3to4.setDHParam(commandAngles[3] + pi ,0.0,0.0,pi / 2);
+	dh3to4 = dHMatrix3to4.setTransformation();
+	
+
+	DHMatrix dHMatrix4to5;
+	Matrix4d dh4to5;
+	dHMatrix4to5.setDHParam(0 ,l3,0.0,0.0);
+	dh4to5 = dHMatrix4to5.setTransformation();
+
+	Matrix4d effecter;
+	Vector3d effecterPosition;
+	effecter = dh0to1*dh1to2*dh2to3*dh3to4*dh4to5;
+	effecterPosition(0) = effecter(0,3);
+	effecterPosition(1) = -effecter(1,3);
+	effecterPosition(2) = effecter(2,3);
+	bool DBUGE = false;
+	if(DBUGE){
+		cout << "effecter: "<<endl;
+		cout<<effecter<<endl;
+		cout << "正向运动学终端位置:" << endl; 
+		cout << "x:" << effecterPosition(0) <<  "y:" <<effecterPosition(1)<<"z:" <<effecterPosition(2);
+	}
+	return effecterPosition;
+}
+Vector3d fRkine(vector<float> commandAngles){
+	DHMatrix dHMatrix0to1;
+	Matrix4d dh0to1;
+	dHMatrix0to1.setDHParam(commandAngles[0],0.0,0.0,pi / 2);
+	dh0to1 = dHMatrix0to1.setTransformation();
+
+
+	DHMatrix dHMatrix1to2;
+	Matrix4d dh1to2;
+	dHMatrix1to2.setDHParam(commandAngles[1] - pi /2 ,0.0,l1,-pi / 2);
+	dh1to2 = dHMatrix1to2.setTransformation();
+	
+
+	DHMatrix dHMatrix2to3;
+	Matrix4d dh2to3;
+	dHMatrix2to3.setDHParam(commandAngles[2] + pi,l2,0.0,-pi / 2);
+	dh2to3 = dHMatrix2to3.setTransformation();
+	
+
+	DHMatrix dHMatrix3to4;
+	Matrix4d dh3to4;
+	dHMatrix3to4.setDHParam(commandAngles[3] + pi ,0.0,0.0,-pi / 2);
+	dh3to4 = dHMatrix3to4.setTransformation();
+	
+
+	DHMatrix dHMatrix4to5;
+	Matrix4d dh4to5;
+	dHMatrix4to5.setDHParam(0   ,l3,0.0,0.0);
+	dh4to5 = dHMatrix4to5.setTransformation();
+	if(DEBUGE){
+		cout<< "dh0to1:" << endl;
+		cout<< dh0to1 << endl;
+		cout<< "dh1to2:" << endl;
+		cout<< dh1to2 << endl;
+		cout<< "dh2to3:" << endl;
+		cout<< dh2to3 << endl;
+		cout<< "dh3to4:" << endl;
+		cout<< dh3to4 << endl;
+		cout<< "dh4to5:" << endl;
+		cout<< dh4to5 << endl;
+	}
+	Matrix4d effecter;
+	Vector3d effecterPosition;
+	effecter = dh0to1*dh1to2*dh2to3*dh3to4*dh4to5;
+	effecterPosition(0) = effecter(0,3);
+	effecterPosition(1) = -effecter(1,3);
+	effecterPosition(2) = effecter(2,3);
+	bool DBUGE = false;
+	if(DBUGE){
+		cout << "effecter: "<<endl;
+		cout<<effecter<<endl;
+		cout << "正向运动学终端位置:" << endl; 
+		cout << "x:" << effecterPosition(0) <<  "y:" <<effecterPosition(1)<<"z:" <<effecterPosition(2);
+	}
+	return effecterPosition;
+}
+void fRkineTest(){
+	AL::ALValue names  = AL::ALValue::array("RShoulderPitch","RShoulderRoll","RElbowYaw","RElbowRoll","RWristYaw");
+	AL::ALValue angles  =  AL::ALValue::array(1.0f,0.1f,1.0f,1.0f,0.0f);
+	float fractionmaxspeed  = 0.1f;
+	motion.setStiffnesses(names,  AL::ALValue::array(1.0f,1.0f,1.0f,1.0f,1.0f));
+	qi::os::sleep(1.0f);
+	motion.setAngles(names, angles, fractionmaxspeed);
+	int temp; 
+	cin >> temp;
+	bool useSensors   = false;
+	std::vector<float> commandAngles = motion.getAngles(names,useSensors);
+	/*int temp; 
+	cin >> temp;*/
+	cout << "commandAngles:" <<	commandAngles<<endl;
+	DHMatrix dHMatrix0to1;
+	Matrix4d dh0to1;
+	dHMatrix0to1.setDHParam(commandAngles[0],0.0,0.0,pi / 2);
+	dh0to1 = dHMatrix0to1.setTransformation();
+	cout<< "dh0to1:" << endl;
+	cout<< dh0to1 << endl;
+
+	DHMatrix dHMatrix1to2;
+	Matrix4d dh1to2;
+	dHMatrix1to2.setDHParam(commandAngles[1] - pi /2 ,0.0,l1,-pi / 2);
+	dh1to2 = dHMatrix1to2.setTransformation();
+	cout<< "dh1to2:" << endl;
+	cout<< dh1to2 << endl;
+
+	DHMatrix dHMatrix2to3;
+	Matrix4d dh2to3;
+	dHMatrix2to3.setDHParam(commandAngles[2] + pi,l2,0.0,-pi / 2);
+	dh2to3 = dHMatrix2to3.setTransformation();
+	cout<< "dh2to3:" << endl;
+	cout<< dh2to3 << endl;
+
+	DHMatrix dHMatrix3to4;
+	Matrix4d dh3to4;
+	dHMatrix3to4.setDHParam(commandAngles[3] + pi ,0.0,0.0,-pi / 2);
+	dh3to4 = dHMatrix3to4.setTransformation();
+	cout<< "dh3to4:" << endl;
+	cout<< dh3to4 << endl;
+
+	DHMatrix dHMatrix4to5;
+	Matrix4d dh4to5;
+	dHMatrix4to5.setDHParam(commandAngles[4] + pi  ,l3,0.0,0.0);
+	dh4to5 = dHMatrix4to5.setTransformation();
+	cout<< "dh4to5:" << endl;
+	cout<< dh4to5 << endl;
+
+	Matrix4d effecter;
+	effecter = dh0to1*dh1to2*dh2to3*dh3to4*dh4to5;
+	cout << "effecter: "<<endl;
+	cout<<effecter<<endl;
+	//commandAngles[0] = commandAngles[0];
+	///*double effectx = l3 *sin(commandAngles[0])*sin(commandAngles[2])*sin(commandAngles[3]) - l3*cos(commandAngles[0])*sin(commandAngles[1])*cos(commandAngles[2])*sin(commandAngles[3])+ l3*cos(commandAngles[3])*cos(commandAngles[0])*cos(commandAngles[1])+l2*cos(commandAngles[0])*cos(commandAngles[1]) - l1*cos(commandAngles[0])*sin(commandAngles[1]);
+	//double effecty = -l3*sin(commandAngles[0])*sin(commandAngles[1])*cos(commandAngles[2])*sin(commandAngles[3]) -l3*cos(commandAngles[0])*sin(commandAngles[2])*sin(commandAngles[3])+l3*sin(commandAngles[0])*cos(commandAngles[1])*cos(commandAngles[3]) + l2*sin(commandAngles[0])*cos(commandAngles[1]) -l1*sin(commandAngles[0])*sin(commandAngles[1]);
+	//double effectz = l3*cos(commandAngles[1])*cos(commandAngles[2])*sin(commandAngles[3])+l3*sin(commandAngles[1])*cos(commandAngles[3]) + l2*sin(commandAngles[1])+l1*cos(commandAngles[1]);*/
+	//double effectx = effecter(0)(3);
+	//double effecty = effecter(1)(3);
+	//double effectz = effecter(2)(3);
+	/*cout << "x:" << effectx <<"y"<<effecty<<"z"<<effectz;*/
+	int space = 0;
+	bool useSensorValues = false;
+	std::string name = "RWristYaw";
+	std::vector<float> result = motion.getPosition(name, space, useSensorValues);
+	std::cout << name << ":" << std::endl;
+	std::cout << "Position (x, y, z): " << result.at(0) << ", " << result.at(2) - 0.1<< ", " << result.at(1) + 0.098 << std::endl;
+	name = "RShoulderPitch";
+	result = motion.getPosition(name, space, useSensorValues);
+	std::cout << name << ":" << std::endl;
+	std::cout << "Position (x, y, z): " << result.at(0) << ", " << result.at(2)<< ", " << result.at(1)<< std::endl;
+	/*MatrixXd Transformation(4,4);
+	 MatrixXd m(2,2);
+	  m(0,0) = 3;
+	  m(1,0) = 2.5;
+	  m(0,1) = -1;
+	  m(1,1) = m(1,0) + m(0,1);
+	  std::cout << m << std::endl;
+	int temp;
+	cin >> temp;*/
+}
+void fkineTest(){
+	AL::ALValue names  = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll","LWristYaw");
+	AL::ALValue angles  =  AL::ALValue::array(1.0f,1.4f,1.0f,-1.0f,0.0f);
+	float fractionmaxspeed  = 0.1f;
+	motion.setStiffnesses(names,  AL::ALValue::array(1.0f,1.0f,1.0f,1.0f,1.0f));
+	qi::os::sleep(1.0f);
+	motion.setAngles(names, angles, fractionmaxspeed);
+	int temp; 
+	cin >> temp;
+	bool useSensors   = false;
+	std::vector<float> commandAngles = motion.getAngles(names,useSensors);
+	/*int temp; 
+	cin >> temp;*/
+	cout << "commandAngles:" <<	commandAngles<<endl;
+	DHMatrix dHMatrix0to1;
+	Matrix4d dh0to1;
+	dHMatrix0to1.setDHParam(commandAngles[0],0.0,0.0,pi / 2);
+	dh0to1 = dHMatrix0to1.setTransformation();
+	cout<< "dh0to1:" << endl;
+	cout<< dh0to1 << endl;
+
+	DHMatrix dHMatrix1to2;
+	Matrix4d dh1to2;
+	dHMatrix1to2.setDHParam(commandAngles[1] + pi /2 ,0.0,l1,pi / 2);
+	dh1to2 = dHMatrix1to2.setTransformation();
+	cout<< "dh1to2:" << endl;
+	cout<< dh1to2 << endl;
+
+	DHMatrix dHMatrix2to3;
+	Matrix4d dh2to3;
+	dHMatrix2to3.setDHParam(commandAngles[2] + pi ,l2,0.0,pi / 2);
+	dh2to3 = dHMatrix2to3.setTransformation();
+	cout<< "dh2to3:" << endl;
+	cout<< dh2to3 << endl;
+
+	DHMatrix dHMatrix3to4;
+	Matrix4d dh3to4;
+	dHMatrix3to4.setDHParam(commandAngles[3] + pi ,0.0,0.0,pi / 2);
+	dh3to4 = dHMatrix3to4.setTransformation();
+	cout<< "dh3to4:" << endl;
+	cout<< dh3to4 << endl;
+
+	DHMatrix dHMatrix4to5;
+	Matrix4d dh4to5;
+	dHMatrix4to5.setDHParam(commandAngles[4] ,l3,0.0,0.0);
+	dh4to5 = dHMatrix4to5.setTransformation();
+	cout<< "dh4to5:" << endl;
+	cout<< dh4to5 << endl;
+
+	Matrix4d effecter;
+	effecter = dh0to1*dh1to2*dh2to3*dh3to4*dh4to5;
+	cout << "effecter: "<<endl;
+	cout<<effecter<<endl;
+	commandAngles[0] = commandAngles[0];
+	double effectx = l3 *sin(commandAngles[0])*sin(commandAngles[2])*sin(commandAngles[3]) - l3*cos(commandAngles[0])*sin(commandAngles[1])*cos(commandAngles[2])*sin(commandAngles[3])+ l3*cos(commandAngles[3])*cos(commandAngles[0])*cos(commandAngles[1])+l2*cos(commandAngles[0])*cos(commandAngles[1]) - l1*cos(commandAngles[0])*sin(commandAngles[1]);
+	double effecty = -l3*sin(commandAngles[0])*sin(commandAngles[1])*cos(commandAngles[2])*sin(commandAngles[3]) -l3*cos(commandAngles[0])*sin(commandAngles[2])*sin(commandAngles[3])+l3*sin(commandAngles[0])*cos(commandAngles[1])*cos(commandAngles[3]) + l2*sin(commandAngles[0])*cos(commandAngles[1]) -l1*sin(commandAngles[0])*sin(commandAngles[1]);
+	double effectz = l3*cos(commandAngles[1])*cos(commandAngles[2])*sin(commandAngles[3])+l3*sin(commandAngles[1])*cos(commandAngles[3]) + l2*sin(commandAngles[1])+l1*cos(commandAngles[1]);
+
+	cout << "x:" << effectx <<"y"<<effecty<<"z"<<effectz;
+	int space = 0;
+	bool useSensorValues = false;
+	std::string name = "LWristYaw";
+	std::vector<float> result = motion.getPosition(name, space, useSensorValues);
+	std::cout << name << ":" << std::endl;
+	std::cout << "Position (x, y, z): " << result.at(0) << ", " << result.at(2) - 0.1<< ", " << result.at(1) -0.098 << std::endl;
+	/*MatrixXd Transformation(4,4);
+	 MatrixXd m(2,2);
+	  m(0,0) = 3;
+	  m(1,0) = 2.5;
+	  m(0,1) = -1;
+	  m(1,1) = m(1,0) + m(0,1);
+	  std::cout << m << std::endl;
+	int temp;
+	cin >> temp;*/
+} 
+
+void DrawBone(Mat& SkeletonImage, CvPoint pointSet[], const Joint* pJoints, int whichone, JointType joint0, JointType joint1);
+
+void drawSkeleton(Mat& SkeletonImage, CvPoint pointSet[], const Joint* pJoints, int whichone);
+void calculLeftAngle(){
+	float LShoulderPitch = 0;
+	float LShoulderPitchAcos = 0;
+	float LShoulderPitchAtan = 0;
+	float LShoulderPitchAsin = 0;
+	float LShoulderRoll = 0;
+	float LElbowYaw = 0;
+	float LElbowYawAcos = 0;
+	float LElbowYawAsin = 0;
+	float LElbowRoll=0;
+
+	float RShoulderPitch = 0;
+	float RShoulderPitchAcos = 0;
+	float RShoulderPitchAtan = 0;
+	float RShoulderPitchAsin = 0;
+	float RShoulderRoll = 0;
+	float RElbowYaw = 0;
+	float RElbowYawAcos = 0;
+	float RElbowYawAsin = 0;
+	float RElbowRoll=0;
+
+	float resultAngle[4];
+
+	float Lerror0;
+	float Lerror1;
+	float Lerror2;
+	float Lerror3;
+
+	float Rerror0;
+	float Rerror1;
+	float Rerror2;
+	float Rerror3;
+	bool test = false;
+	//从机器人的躯干坐标系转移到肩部坐标系
+	float flag = LShouldToElbow[1] ;
+	LShouldToElbow[1] = LShouldToElbow[2];
+	LShouldToElbow[2] = flag;
+
+	flag = LElbowToWrist[1];
+	LElbowToWrist[1] = LElbowToWrist[2];
+	LElbowToWrist[2] = flag;
+
+	if(test){
+		flag = LWristToThumb[1];
+		LWristToThumb[1] = LWristToThumb[2];
+		LWristToThumb[2] = flag;
+
+		LVertical[0] = -vertical[2];
+		LVertical[1] = -vertical[0];
+		LVertical[2] = vertical[1];
+
+		flag = LVertical[1] ;
+		LVertical[1] = LVertical[2];
+		LVertical[2] = flag;
+	}
+	
+
+	flag = RShouldToElbow[1] ;
+	RShouldToElbow[1] = RShouldToElbow[2];
+	RShouldToElbow[2] = flag;
+
+	flag = RElbowToWrist[1];
+	RElbowToWrist[1] = RElbowToWrist[2];
+	RElbowToWrist[2] = flag;
+
+
+	LShoulderRoll = asin(LShouldToElbow[2] / sqrt(l1*l1+l2*l2)) + atan(-l1 / l2);
+	//cout << "LShoulderRoll::" << LShoulderRoll <<endl;
+	//cout << "LShoulderRoll::" << LShoulderRoll <<endl;
+	LShoulderPitchAcos = acos(LShouldToElbow[0] / (l2*cos(LShoulderRoll) - l1*sin(LShoulderRoll)));
+	//cout << "LShoulderPitchAcos::" << LShoulderPitchAcos<<endl;	
+	LShoulderPitchAsin = asin(LShouldToElbow[1] / (l2*cos(LShoulderRoll) - l1*sin(LShoulderRoll)));
+	//cout << "LShoulderPitchAsin::" << LShoulderPitchAsin<<endl;	
+	LShoulderPitchAtan = atan(LShouldToElbow[1] / LShouldToElbow[0]);
+	//cout << "LShoulderPitchAtan::" << LShoulderPitchAtan<<endl;
+	if(LShoulderPitchAsin > 0){
+		LShoulderPitch =  LShoulderPitchAcos;
+		//cout << "LShoulderPitch:" << -LShoulderPitchAcos <<  endl;
+	}else{
+		LShoulderPitch =  -LShoulderPitchAcos;
+		//cout << "LShoulderPitch:" << LShoulderPitchAcos <<  endl;
+	}
+	//angle0 = -LShoulderPitch;
+	//cout << "LShoulderRoll::" << LShoulderRoll <<endl;
+	//angle1 = LShoulderRoll;
+	test = false;
+	float LElbowToWristTemp[3] = {0,0,0};
+	LElbowToWristTemp[0] = -sin(LShoulderRoll)*cos(LShoulderPitch)*LElbowToWrist[0]  - sin(LShoulderPitch)* sin(LShoulderRoll)*LElbowToWrist[1] + cos(LShoulderRoll)*LElbowToWrist[2];
+	LElbowToWristTemp[1] = sin(LShoulderPitch)*LElbowToWrist[0]-cos(LShoulderPitch)*LElbowToWrist[1];
+	LElbowToWristTemp[2] = cos(LShoulderPitch)*cos(LShoulderRoll)*LElbowToWrist[0] + sin(LShoulderPitch)*cos(LShoulderRoll)*LElbowToWrist[1] + sin(LShoulderRoll)*LElbowToWrist[2];
+	
+	if(test){
+		DHMatrix dHMatrix0to1;
+		Matrix4d dh0to1;
+		dHMatrix0to1.setDHParam(LShoulderPitch,0.0,0.0,pi / 2);
+		dh0to1 = dHMatrix0to1.setTransformation();
+
+		DHMatrix dHMatrix1to2;
+		Matrix4d dh1to2;
+		dHMatrix1to2.setDHParam(LShoulderRoll + pi /2 ,0.0,l1,pi / 2);
+		dh1to2 = dHMatrix1to2.setTransformation();	
+		Vector4d ElbowToWrist;
+		Vector4d shoulderToElbow;
+		ElbowToWrist(0) = LElbowToWrist[0];
+		ElbowToWrist(1) = LElbowToWrist[1];
+		ElbowToWrist(2) = LElbowToWrist[2];
+		ElbowToWrist(3) = 0;
+		shoulderToElbow(0) = LShouldToElbow[0];
+		shoulderToElbow(1) = LShouldToElbow[1];
+		shoulderToElbow(2) = LShouldToElbow[2];
+		shoulderToElbow(3) = 1;
+
+		Vector4d temp = dh1to2.inverse()*dh0to1.inverse()*ElbowToWrist;
+		cout << "temp1" << endl << temp <<endl ;
+		cout << "LElbowToWristTemp" << LElbowToWristTemp[0] <<","<<LElbowToWristTemp[1] <<","<<LElbowToWristTemp[2] << endl;
+		temp = dh1to2.inverse()*dh0to1.inverse()*shoulderToElbow ;
+		cout << "temp2" << endl << temp <<endl ;
+		cout <<	"	LElbowToWristTemp[0]" << LElbowToWristTemp[0] <<","<<	LElbowToWristTemp[1] <<"，"<<	LElbowToWristTemp[2] <<endl;
+		cout << "***********************************************************************************************" << endl;
+
+	} 
+
+	LElbowYaw =  -atan(LElbowToWristTemp[1] / LElbowToWristTemp[0]);
+	//cout << "LElbowYaw::" << LElbowYaw<<endl;
+	float error1 = sqrt(LElbowToWristTemp[0]*LElbowToWristTemp[0] + LElbowToWristTemp[1]*LElbowToWristTemp[1] ) / l3;
+	//cout <<"error1:" << error1<<endl;
+	if(error1 > 1){
+		error1 = 1;
+	}
+	LElbowRoll = -asin(error1);
+	//cout << "LElbowRoll::" << LElbowRoll<<endl;
+	LElbowYawAcos = acos(-LElbowToWristTemp[0] / sqrt(LElbowToWristTemp[0]*LElbowToWristTemp[0] + LElbowToWristTemp[1]*LElbowToWristTemp[1]));
+	//cout << "LElbowYawAcos::" << LElbowYawAcos<<endl;
+	LElbowYawAsin = asin(-LElbowToWristTemp[1] / sqrt(LElbowToWristTemp[0]*LElbowToWristTemp[0] + LElbowToWristTemp[1]*LElbowToWristTemp[1]));
+
+	double tempAcos = acos( (LElbowToWristTemp[2]) / l3);
+	//cout << "LElbowYawAcos: "<< LElbowYawAcos <<endl;
+	//cout << "tempAcos: "<< tempAcos <<endl;
+	//cout << "LElbowYawAsin::" << LElbowYawAsin<<endl;
+	if(LElbowYawAsin > 0){
+		LElbowYaw = -LElbowYawAcos;
+	}else{
+		LElbowYaw = LElbowYawAcos;
+	}
+	test = false;
+	if(test){
+		DHMatrix dHMatrix0to1;
+		Matrix4d dh0to1;
+		dHMatrix0to1.setDHParam(LShoulderPitch,0.0,0.0,pi / 2);
+		dh0to1 = dHMatrix0to1.setTransformation();
+
+		DHMatrix dHMatrix1to2;
+		Matrix4d dh1to2;
+		dHMatrix1to2.setDHParam(LShoulderRoll + pi /2 ,0.0,l1,pi / 2);
+		dh1to2 = dHMatrix1to2.setTransformation();	
+
+		DHMatrix dHMatrix2to3;
+		Matrix4d dh2to3;
+		dHMatrix2to3.setDHParam(LElbowYaw + pi ,l2,0.0,pi / 2);
+		dh2to3 = dHMatrix2to3.setTransformation();
+
+		DHMatrix dHMatrix3to4;
+		Matrix4d dh3to4;
+		dHMatrix3to4.setDHParam(LElbowRoll + pi ,0.0,0.0,pi / 2);
+		dh3to4 = dHMatrix3to4.setTransformation();
+		Vector4d TempLWristToThumb;
+		TempLWristToThumb(0) = LWristToThumb[0];
+		TempLWristToThumb(1) = LWristToThumb[1];
+		TempLWristToThumb(2) = LWristToThumb[2];
+		TempLWristToThumb(3) = 0;
+
+		Vector4d axisXInWrist;
+		axisXInWrist(0) = -1;
+		axisXInWrist(1) = 0;
+		axisXInWrist(2) = 0;
+		axisXInWrist(3) = 0;
+
+		Vector4d axisXInShould;
+
+		axisXInShould = dh0to1 * dh1to2 * dh2to3 * dh3to4 * axisXInWrist;
+		//Vector4d TempVector =  dh3to4.inverse()* dh2to3.inverse() * dh1to2.inverse() * dh0to1.inverse() * TempLWristToThumb;
+		
+		double referenceX[3] ={0,0,0};
+		referenceX[0]= axisXInShould(0);
+		referenceX[1]= axisXInShould(1);
+		referenceX[2]= axisXInShould(2);
+		double angletemp = 	returnIncludeAngle(referenceX,LVertical);
+		cout << "angletemp::" << angletemp <<endl;
+		/*double acosWristYaw = acos(TempVector(0) / (-l4 * sin(LAngleForThumbToHand)));
+		double asinWristYaw = asin(TempVector(1) / (-l4 * sin(LAngleForThumbToHand)));	
+		cout << "LAngleForThumbToHand:" << LAngleForThumbToHand << endl;
+		cout << "acosWristYaw：" <<  acosWristYaw << "asinWristYaw:" << asinWristYaw <<endl;
+		cout << "TempVector(2)" << TempVector(2) << "l4*cos(angle): " << l4 * cos(LAngleForThumbToHand) << endl;
+		cout << "TempVector(3)" << TempVector(3) << endl;*/
+	}
+	//cout << "LElbowYaw::" << LElbowYaw<<endl;
+	//cout << "LElbowRoll::" << LElbowRoll<<endl;
+	Lerror0 = abs(angle0 + LShoulderPitch);
+	Lerror1 = abs(angle1 - LShoulderRoll);
+	Lerror2 = abs(angle2 - LElbowYaw);
+	Lerror3 = abs(angle3 - LElbowRoll);
+	//***********************去抖动操作******************************//
+	if(Lerror0 > FrameError){
+		angle0 = -LShoulderPitch;
+	}
+	if(Lerror1 > FrameError){
+		angle1 = LShoulderRoll;
+	}
+	if(Lerror2 > FrameError && Lerror2 < FrameMaxError){
+		angle2 = LElbowYaw;
+	}
+	/*if(  > 2.0){
+		system("pause");
+	}*/
+	if(Lerror3 > FrameError){
+		angle3 = LElbowRoll;
+	}
+	DATAVIEW = false;
+	if(DATAVIEW){
+		ocout <<angle0<<" "<<angle1<<" "<<angle2<<" "<<angle3<< " " << endl;
+		ocout1 <<-LShoulderPitch<<" "<< LShoulderRoll<<" "<<LElbowYaw<<" " << LElbowRoll << endl;
+	}
+	bool BIHUAN = true;
+	if(BIHUAN){
+		vector<float> Angles(4);
+		Vector3d position;
+		Angles[0] = angle0;
+		Angles[1] = angle1;
+		Angles[2] = angle2;
+		Angles[3] = angle3;
+		position = fkine(Angles);
+	/*	cout << "angle：" <<Angles << endl;
+		cout << " position:" << endl <<position<< endl;
+		cout << "position真实："<< endl <<"x::" << LShouldToElbow[0] + LElbowToWrist[0] <<"y::" <<  LShouldToElbow[1] + LElbowToWrist[1]  <<"z::"<< LShouldToElbow[2] + LElbowToWrist[2] <<endl;*/
+		DATAVIEW = false;
+		if(DATAVIEW){
+			ocout <<position(0)<<"  "<<position(1)<<"  "<<position(2)<<"  "<< endl;
+			ocout1 << LShouldToElbow[0] + LElbowToWrist[0]<<"  "<<  LShouldToElbow[1] + LElbowToWrist[1]<<"  "<< LShouldToElbow[2] + LElbowToWrist[2]<<endl;
+		}
+		Vector3d errorPosition ;
+		errorPosition(0) = position(0) - (LShouldToElbow[0] + LElbowToWrist[0]) ;
+		errorPosition(1) = position(1) - (LShouldToElbow[1] + LElbowToWrist[1]) ;
+		errorPosition(2) = position(2) - (LShouldToElbow[2] + LElbowToWrist[2]) ;
+		double poverError = sqrt(errorPosition(0)*errorPosition(0) + errorPosition(1)*errorPosition(1)+errorPosition(2)*errorPosition(2));
+		//cout << "error ： " << poverError << endl;
+		if(poverError > 0.04){
+			cout << "结果不对***********************************************************" << endl;
+		}else{
+			LShoulderPitchResult = angle0;
+			LShoulderRollResult = angle1;
+			LElboYawResult = angle2;
+			LElbowRollResult = angle3;
+		}
+
+ 	}
+
+
+	RShoulderRoll = asin(RShouldToElbow[2] / sqrt(l1*l1+l2*l2)) + atan(l1 / l2);
+	RShoulderPitchAcos = acos(RShouldToElbow[0] / (l2*cos(RShoulderRoll) + l1*sin(RShoulderRoll)));
+	//cout << "LShoulderPitchAcos::" << LShoulderPitchAcos<<endl;	
+	RShoulderPitchAsin = asin(RShouldToElbow[1] / (l2*cos(RShoulderRoll) + l1*sin(RShoulderRoll)));
+	//cout << "LShoulderPitchAsin::" << LShoulderPitchAsin<<endl;	
+	RShoulderPitchAtan = atan(RShouldToElbow[1] / RShouldToElbow[0]);
+
+	if(RShoulderPitchAsin > 0){
+		RShoulderPitch =  RShoulderPitchAcos;
+		//cout << "LShoulderPitch:" << -LShoulderPitchAcos <<  endl;
+	}else{
+		RShoulderPitch =  -RShoulderPitchAcos;
+		//cout << "LShoulderPitch:" << LShoulderPitchAcos <<  endl;
+	}
+	float RElbowToWristTemp[3] = {0,0,0};
+	RElbowToWristTemp[0] = sin(RShoulderRoll)*cos(RShoulderPitch)*RElbowToWrist[0]  + sin(RShoulderPitch)* sin(RShoulderRoll)*RElbowToWrist[1] - cos(RShoulderRoll)*RElbowToWrist[2];
+	RElbowToWristTemp[1] = -sin(RShoulderPitch)*RElbowToWrist[0] + cos(RShoulderPitch)*RElbowToWrist[1];
+	RElbowToWristTemp[2] = cos(RShoulderPitch)*cos(RShoulderRoll)*RElbowToWrist[0] + sin(RShoulderPitch)*cos(RShoulderRoll)*RElbowToWrist[1] + sin(RShoulderRoll)*RElbowToWrist[2];
+	RElbowYaw =  -atan(RElbowToWristTemp[1] / RElbowToWristTemp[0]);
+	error1 = sqrt(RElbowToWristTemp[0]*RElbowToWristTemp[0] + RElbowToWristTemp[1]*RElbowToWristTemp[1] ) / l3;
+	//cout <<"error1:" << error1<<endl;
+	if(error1 > 1){
+		error1 = 1;
+	}
+	RElbowRoll = asin(error1);
+
+	RElbowYawAcos = acos(-RElbowToWristTemp[0] / sqrt(RElbowToWristTemp[0]*RElbowToWristTemp[0] +RElbowToWristTemp[1]*RElbowToWristTemp[1]));
+	//cout << "LElbowYawAcos::" << LElbowYawAcos<<endl;
+	RElbowYawAsin = asin(-RElbowToWristTemp[1] / sqrt(RElbowToWristTemp[0]*RElbowToWristTemp[0] +RElbowToWristTemp[1]*RElbowToWristTemp[1]));
+	//cout << "LElbowYawAsin::" << LElbowYawAsin<<endl;
+	if(RElbowYawAsin > 0){
+		RElbowYaw = -RElbowYawAcos;
+	}else{
+		RElbowYaw = RElbowYawAcos;
+	}
+
+	Lerror0 = abs(angle4 + RShoulderPitch);
+	Lerror1 = abs(angle5 - RShoulderRoll);
+	Lerror2 = abs(angle6 - RElbowYaw);
+	Lerror3 = abs(angle7 - RElbowRoll);
+	//***********************去抖动操作******************************//
+	if(Lerror0 > FrameError){
+		angle4 = -RShoulderPitch;
+	}
+	if(Lerror1 > FrameError){
+		angle5 = RShoulderRoll;
+	}
+	if(Lerror2 > FrameError && Lerror2< FrameMaxError){
+		angle6 = RElbowYaw;
+	}
+	if(Lerror3 > FrameError){
+		angle7 = RElbowRoll;
+	}
+	DATAVIEW = false;
+	if(DATAVIEW){
+		ocout <<angle0<<","<<angle1<<","<<angle2<<","<<angle3 << endl;
+		ocout1 <<-RShoulderPitch<<","<< RShoulderRoll<<","<<RElbowYaw<<","<<RElbowRoll<<endl;
+	}
+	BIHUAN = true;
+	if(BIHUAN){
+		vector<float> Angles(4);
+		Vector3d position;
+		Angles[0] = angle4;
+		Angles[1] = angle5;
+		Angles[2] = angle6;
+		Angles[3] = angle7;
+		position = fRkine(Angles);
+		Vector3d errorPosition ;
+		errorPosition(0) = position(0) - (RShouldToElbow[0] + RElbowToWrist[0]) ;
+		errorPosition(1) = position(1) - (RShouldToElbow[1] + RElbowToWrist[1]) ;
+		errorPosition(2) = position(2) - (RShouldToElbow[2] + RElbowToWrist[2]) ;
+		double poverError = sqrt(errorPosition(0)*errorPosition(0) + errorPosition(1)*errorPosition(1)+errorPosition(2)*errorPosition(2));
+		//cout << "error ： " << poverError << endl;
+		if(poverError > 0.04){
+			cout << "结果不对***********************************************************" << endl;
+		}else{
+			RShoulderPitchResult = angle4;
+			RShoulderRollResult = angle5;
+			RElboYawResult = angle6;
+			RElbowRollResult = angle7;
+		}
+	}	
+	/*angle0 = -LShoulderPitch;
+	angle1 = LShoulderRoll;
+	angle2 = LElbowYaw;
+	angle3 = LElbowRoll;*/
+	//LElbowYaw = asin(LElbowToWristTemp[1] / l3 / sin(LElbowRoll));
+	//cout << "LElbowYaw::" << LElbowYaw<<endl;
+}
+void controlNao(){
+	  float resultLeft[4];
+	 // vector<float> commandAngles(4);
+	  NewtonIK = false;
+	  if(NewtonIK){
+		vector<float> tagertPos(3);
+		Vector4d ikAngle;
+		tagertPos[0] = LShouldToWrist[0];
+		tagertPos[1] = LShouldToWrist[2];
+		tagertPos[2] = LShouldToWrist[1];
+		//cout << "tagertPos" << tagertPos << endl;
+		ikAngle = ikine(tagertPos);	
+		////cout << "ikAngle" << ikAngle << endl;
+		if(transfer){
+			AL::ALValue names       = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll"/*,"RShoulderPitch", "RShoulderRoll","RElbowYaw","RElbowRoll"*/);
+			AL::ALValue angles      = AL::ALValue::array(ikAngle(0), ikAngle(1),ikAngle(2),ikAngle(3)/*,angle4, angle5,angle6,angle7*/);
+			float fractionMaxSpeed  = 0.1f;
+			motion.setStiffnesses(names, AL::ALValue::array(1.0f,1.0f,1.0f,1.0f/*,1.0f,1.0f,1.0f,1.0f*/));
+			motion.setAngles(names, angles, fractionMaxSpeed);
+		}
+	  } 
+	  bool naoAPI = false;
+	  if(naoAPI){
+		  std::string chainName = "LArm";
+		  int space = 0;
+		  std::vector<float> position(6, 0.0f); 
+		  position[0] = LShouldToHand[0];
+		  position[1] = LShouldToHand[1];
+		  position[2] = LShouldToHand[2];
+		  float fractionMaxSpeed = 0.9f;
+		  motion.setPositions(chainName, space, position, fractionMaxSpeed, 7);
+		  //qi::os::sleep(2.0f);
+	  }
+	  bool jiexijie = true;
+	  if(jiexijie){
+		  calculLeftAngle();
+		  //testHand();
+		  //Sleep(1);
+		  AL::ALValue names       = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll","LWristYaw","RShoulderPitch", "RShoulderRoll","RElbowYaw","RElbowRoll","RWristYaw");
+		  AL::ALValue angles      = AL::ALValue::array(LShoulderPitchResult, LShoulderRollResult,LElboYawResult,LElbowRollResult,LWristYaw,RShoulderPitchResult, RShoulderRollResult,RElboYawResult,RElbowRollResult,0.0f);
+		  float fractionMaxSpeed  = 0.55f;
+		  motion.setStiffnesses(names, AL::ALValue::array(1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f));
+		  motion.setAngles(names, angles, fractionMaxSpeed);
+	  }
+	/*  calculLeftAngle();
+	
+	  AL::ALValue names       = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll");
+	  AL::ALValue angles      = AL::ALValue::array(angle0, angle1,angle2,angle3);
+	  float fractionMaxSpeed  = 0.55f;
+	  motion.setStiffnesses(names, AL::ALValue::array(1.0f,1.0f,1.0f,1.0f));
+	  motion.setAngles(names, angles, fractionMaxSpeed);*/
+}
+//22 thumbLeft
+inline double* getCross(double *vector1,double * vector2){
+	double* tempResult = new double[3]; 
+	tempResult[0] = vector1[1]*vector2[2] - vector1[2]*vector2[1];
+
+	tempResult[1] = vector1[2]*vector2[0] - vector1[0]*vector2[2];
+
+	tempResult[2] = vector1[0]*vector2[1] - vector1[1]*vector2[0];
+
+	return tempResult;
+
+}
+double returnIncludeAngle(double *vector1,double *vector2){
+	double angleTemp;
+	angleTemp = acos((vector1[0]*vector2[0] + vector1[1]*vector2[1] + vector1[2]*vector2[2]) /(sqrt(vector1[0]*vector1[0] + vector1[1]*vector1[1] + vector1[2]*vector1[2]) * sqrt(vector2[0]*vector2[0] + vector2[1]*vector2[1] + vector2[2]*vector2[2])));
+	return angleTemp;
+
+} 
+int getLeftHandPostion(const Joint * skel){
+	double ShouldToElbow[3] ={0,0,0};
+	double ShouldToElbowUnit[3] ={0,0,0};
+	double ElbowToWrist[3] ={0,0,0};
+	double ElbowToWristUnit[3] ={0,0,0};
+	double WristTohand[3] ={0,0,0};
+	double WristToThumb[3] ={0,0,0};
+	double naoTorsoToShoulder[3] = {0,0,0};
+	double robotShouldToElbow[3] = {0,0,0};
+	double robotElbowToWrist[3] ={0,0,0};
+	double robotElbowToHand[3] ={0,0,0};
+	double k1=0.0,k2=0.0;
+	double LElbowToHand[3] = {0,0,0};
+	
+	//double referenceNormal[3] ={0,0,0};
+	double *referenceNormal;
+	double *referenceNormalCross;
+	double yReference[3]={0,1,0};
+	
+	/*naoTorsoToShoulder[0] = 0;
+	naoTorsoToShoulder[1] = 98;
+	naoTorsoToShoulder[2] = 100;*/
+	ShouldToElbow[0] = skel[5].Position.X - skel[4].Position.X;
+	ShouldToElbow[1] = skel[5].Position.Y - skel[4].Position.Y;
+	ShouldToElbow[2] = skel[5].Position.Z - skel[4].Position.Z;
+	ShouldToElbowUnit[0] = ShouldToElbow[0] / sqrt(ShouldToElbow[0]*ShouldToElbow[0] +ShouldToElbow[1]*ShouldToElbow[1]+ ShouldToElbow[2]*ShouldToElbow[2]);
+	ShouldToElbowUnit[1] = ShouldToElbow[1] / sqrt(ShouldToElbow[0]*ShouldToElbow[0] +ShouldToElbow[1]*ShouldToElbow[1]+ ShouldToElbow[2]*ShouldToElbow[2]);
+	ShouldToElbowUnit[2] = ShouldToElbow[2] / sqrt(ShouldToElbow[0]*ShouldToElbow[0] +ShouldToElbow[1]*ShouldToElbow[1]+ ShouldToElbow[2]*ShouldToElbow[2]);
+	ElbowToWrist[0] = skel[6].Position.X - skel[5].Position.X;
+	ElbowToWrist[1] = skel[6].Position.Y - skel[5].Position.Y;
+	ElbowToWrist[2] = skel[6].Position.Z - skel[5].Position.Z;
+	ElbowToWristUnit[0] = ElbowToWrist[0] / sqrt(ElbowToWrist[0]*ElbowToWrist[0] +ElbowToWrist[1]*ElbowToWrist[1]+ ElbowToWrist[2]*ElbowToWrist[2]);
+	ElbowToWristUnit[1] = ElbowToWrist[1] / sqrt(ElbowToWrist[0]*ElbowToWrist[0] +ElbowToWrist[1]*ElbowToWrist[1]+ ElbowToWrist[2]*ElbowToWrist[2]);
+	ElbowToWristUnit[2] = ElbowToWrist[2] / sqrt(ElbowToWrist[0]*ElbowToWrist[0] +ElbowToWrist[1]*ElbowToWrist[1]+ ElbowToWrist[2]*ElbowToWrist[2]);
+	robotShouldToElbow[0] = ShouldToElbowUnit[0] * ShoulderToElbowLength/ 1000;
+	robotShouldToElbow[1] = ShouldToElbowUnit[1] * ShoulderToElbowLength/ 1000;
+	robotShouldToElbow[2] = ShouldToElbowUnit[2] * ShoulderToElbowLength/ 1000;
+	//cout << "robotShouldToElbow[0] :: " << robotShouldToElbow[2] << "robotShouldToElbow[1] ::"<<robotShouldToElbow[0] << "robotShouldToElbow[2] ::"<<robotShouldToElbow[1] <<endl;
+	//cout << "robotShouldToElbow[0] :: " << -robotShouldToElbow[2] << "robotShouldToElbow[1] ::"<<-robotShouldToElbow[0] + 0.098 << "robotShouldToElbow[2] ::"<<robotShouldToElbow[1] + 0.1 <<endl;
+	robotElbowToWrist[0] = ElbowToWristUnit[0] * (ElbowToWristLength) / 1000;
+	robotElbowToWrist[1] = ElbowToWristUnit[1] * (ElbowToWristLength) / 1000;
+	robotElbowToWrist[2] = ElbowToWristUnit[2] * (ElbowToWristLength) / 1000;
+	//cout << "robotElbowToWrist[0] :: " << robotElbowToWrist[2] << "robotShouldToElbow[1] ::"<<robotElbowToWrist[0] << "robotShouldToElbow[2] ::"<<robotElbowToWrist[1] <<endl;
+	LShouldToElbow[0] = -robotShouldToElbow[2];
+	LShouldToElbow[1] = -robotShouldToElbow[0];
+	LShouldToElbow[2] = robotShouldToElbow[1];
+
+	//cout << "LShouldToElbow" << endl;
+	//cout <<LShouldToElbow[0]<< ", " << LShouldToElbow[1]<< ", " <<LShouldToElbow[2]<< ", " <<endl;
+	LElbowToWrist[0] = -robotElbowToWrist[2];
+	LElbowToWrist[1] = -robotElbowToWrist[0];
+	LElbowToWrist[2] = robotElbowToWrist[1];
+	//cout << "LElbowToWrist" << endl;
+	//cout <<LElbowToWrist[0]<< ", " << LElbowToWrist[1]<< ", " <<LElbowToWrist[2]<< ", " <<endl;
+	if(NewtonIK){
+		LShouldToWrist[0] = LElbowToWrist[0] + LShouldToElbow[0];
+		LShouldToWrist[1] = LElbowToWrist[1] + LShouldToElbow[1];
+		LShouldToWrist[2] = LElbowToWrist[2] + LShouldToElbow[2];
+	}
+	bool naoAPI = false;
+	if(naoAPI){
+		robotElbowToHand[0] =  ElbowToWristUnit[0] * (ElbowToWristLength + WristToHandLength) / 1000; 
+		robotElbowToHand[1] =  ElbowToWristUnit[1] * (ElbowToWristLength + WristToHandLength) / 1000;  
+		robotElbowToHand[2] =  ElbowToWristUnit[2] * (ElbowToWristLength + WristToHandLength) / 1000;  
+
+		LElbowToHand[0] = -robotElbowToHand[2];
+		LElbowToHand[1] = -robotElbowToHand[0];
+		LElbowToHand[2] = robotElbowToHand[1];
+
+		LShouldToHand[0] = LElbowToHand[0] + LShouldToElbow[0];
+		LShouldToHand[1] = LElbowToHand[1] + LShouldToElbow[1] + 0.098;
+		LShouldToHand[2] = LElbowToHand[2] + LShouldToElbow[2] + 0.1;
+		cout << "LShouldToHand"<<LShouldToHand[0]<< ","<<LShouldToHand[1] <<  ","<<LShouldToHand[2] <<endl;
+	}
+	//
+	WristTohand[0] = skel[7].Position.X - skel[6].Position.X;
+	WristTohand[1] = skel[7].Position.Y - skel[6].Position.Y;
+	WristTohand[2] = skel[7].Position.Z - skel[6].Position.Z;
+
+	WristToThumb[0] = skel[22].Position.X - skel[6].Position.X;
+	WristToThumb[1] = skel[22].Position.Y - skel[6].Position.Y;
+	WristToThumb[2] = skel[22].Position.Z - skel[6].Position.Z;
+
+	l4 = sqrt(WristToThumb[0]*WristToThumb[0] + WristToThumb[1]*WristToThumb[1] + WristToThumb[2]*WristToThumb[2]);
+	LWristToThumb[0] = -WristToThumb[2];
+	LWristToThumb[1] = -WristToThumb[0];
+	LWristToThumb[2] = WristToThumb[1];
+
+
+	LAngleForThumbToHand = returnIncludeAngle(WristTohand,WristToThumb);
+
+	k2 =1;
+	k1 = -(WristToThumb[0]*ElbowToWrist[0] +WristToThumb[1]*ElbowToWrist[1]+ WristToThumb[2]*ElbowToWrist[2])/(WristTohand[0]*ElbowToWrist[0] +WristTohand[1]*ElbowToWrist[1]+ WristTohand[2]*ElbowToWrist[2]);
+	vertical[0] = k1* WristTohand[0] + k2 * WristToThumb[0];
+	vertical[1] = k1* WristTohand[1] + k2 * WristToThumb[1];
+	vertical[2] = k1* WristTohand[2] + k2 * WristToThumb[2];
+	/*cout <<"vertical::" <<endl;
+	cout << vertical[0]<<" ，" <<vertical[1]<<" ，" <<vertical[2]<<endl;*/
+	referenceNormal = getCross(ShouldToElbow,ElbowToWrist);
+	referenceNormal = getCross(referenceNormal,ElbowToWrist);
+	double temp =acos((referenceNormal[0]*vertical[0]+referenceNormal[1]*vertical[1]+referenceNormal[2]*vertical[2]) / (sqrt(referenceNormal[0]*referenceNormal[0]+referenceNormal[1]*referenceNormal[1]+referenceNormal[2]*referenceNormal[2])*sqrt(vertical[0]*vertical[0]+vertical[1]*vertical[1]+vertical[2]*vertical[2])));
+	cout << "temp:" <<temp <<endl;
+	//double temp =(referenceNormal[0]*vertical[0]+referenceNormal[1]*vertical[1]+referenceNormal[2]*vertical[2]) / (sqrt(referenceNormal[0]*referenceNormal[0]+referenceNormal[1]*referenceNormal[1]+referenceNormal[2]*referenceNormal[2])*sqrt(vertical[0]*vertical[0]+vertical[1]*vertical[1]+vertical[2]*vertical[2]));
+	//referenceNormalCross = getCross(referenceNormal,vertical);
+	//double tempSin =asin((referenceNormalCross[0]*referenceNormalCross[0] + referenceNormalCross[1]*referenceNormalCross[1] + referenceNormalCross[2]*referenceNormalCross[2]) /((referenceNormal[0]*referenceNormal[0] + referenceNormal[1]*referenceNormal[1] + referenceNormal[2]*referenceNormal[2])*(vertical[0]*vertical[0] + vertical[1]*vertical[1] + vertical[2]*vertical[2])));
+	//if((referenceNormal[0]*vertical[0]+referenceNormal[1]*vertical[1]+referenceNormal[2]*vertical[2]) / (sqrt(referenceNormal[0]*referenceNormal[0]+referenceNormal[1]*referenceNormal[1]+referenceNormal[2]*referenceNormal[2])*sqrt(vertical[0]*vertical[0]+vertical[1]*vertical[1]+vertical[2]*vertical[2])) > 0){
+	//if(abs(LWristYaw - temp) > 0.03 && abs(LWristYaw - temp) < 1.5){
+	if(vertical[1] > 0 ){
+
+		LWristYaw = -temp;
+
+	}else{
+		if(vertical[0] < 0  ){
+			LWristYaw = -temp;
+		}else{
+			LWristYaw = temp;
+		}
+	} 
+	//}
+	if(LWristYaw > 1.823){
+		LWristYaw = 1.83;
+	}
+	if(LWristYaw < -1.823){
+		LWristYaw = -1.83;
+	}
+	//LWristYaw = temp;
+	//cout << "LWristYaw"<<LWristYaw<< endl;
+	/*}else{
+		LWristYaw = -temp;
+	}*/
+	
+
+
+	ShouldToElbow[0] = skel[9].Position.X - skel[8].Position.X;
+	ShouldToElbow[1] = skel[9].Position.Y - skel[8].Position.Y;
+	ShouldToElbow[2] = skel[9].Position.Z - skel[8].Position.Z ;
+	ShouldToElbowUnit[0] = ShouldToElbow[0] / sqrt(ShouldToElbow[0]*ShouldToElbow[0] +ShouldToElbow[1]*ShouldToElbow[1]+ ShouldToElbow[2]*ShouldToElbow[2]);
+	ShouldToElbowUnit[1] = ShouldToElbow[1] / sqrt(ShouldToElbow[0]*ShouldToElbow[0] +ShouldToElbow[1]*ShouldToElbow[1]+ ShouldToElbow[2]*ShouldToElbow[2]);
+	ShouldToElbowUnit[2] = ShouldToElbow[2] / sqrt(ShouldToElbow[0]*ShouldToElbow[0] +ShouldToElbow[1]*ShouldToElbow[1]+ ShouldToElbow[2]*ShouldToElbow[2]);
+	ElbowToWrist[0] = skel[10].Position.X - skel[9].Position.X ;
+	ElbowToWrist[1] = skel[10].Position.Y - skel[9].Position.Y ;
+	ElbowToWrist[2] = skel[10].Position.Z - skel[9].Position.Z ;
+	ElbowToWristUnit[0] = ElbowToWrist[0] / sqrt(ElbowToWrist[0]*ElbowToWrist[0] +ElbowToWrist[1]*ElbowToWrist[1]+ ElbowToWrist[2]*ElbowToWrist[2]);
+	ElbowToWristUnit[1] = ElbowToWrist[1] / sqrt(ElbowToWrist[0]*ElbowToWrist[0] +ElbowToWrist[1]*ElbowToWrist[1]+ ElbowToWrist[2]*ElbowToWrist[2]);
+	ElbowToWristUnit[2] = ElbowToWrist[2] / sqrt(ElbowToWrist[0]*ElbowToWrist[0] +ElbowToWrist[1]*ElbowToWrist[1]+ ElbowToWrist[2]*ElbowToWrist[2]);
+	robotShouldToElbow[0] = ShouldToElbowUnit[0] * ShoulderToElbowLength/ 1000;
+	robotShouldToElbow[1] = ShouldToElbowUnit[1] * ShoulderToElbowLength/ 1000;
+	robotShouldToElbow[2] = ShouldToElbowUnit[2] * ShoulderToElbowLength/ 1000;
+	//cout << "robotShouldToElbow[0] :: " << robotShouldToElbow[2] << "robotShouldToElbow[1] ::"<<robotShouldToElbow[0] << "robotShouldToElbow[2] ::"<<robotShouldToElbow[1] <<endl;
+	//cout << "robotShouldToElbow[0] :: " << -robotShouldToElbow[2] << "robotShouldToElbow[1] ::"<<-robotShouldToElbow[0] + 0.098 << "robotShouldToElbow[2] ::"<<robotShouldToElbow[1] + 0.1 <<endl;
+	robotElbowToWrist[0] = ElbowToWristUnit[0] * (ElbowToWristLength) / 1000;
+	robotElbowToWrist[1] = ElbowToWristUnit[1] * (ElbowToWristLength) / 1000;
+	robotElbowToWrist[2] = ElbowToWristUnit[2] * (ElbowToWristLength) / 1000;
+	//cout << "robotElbowToWrist[0] :: " << robotElbowToWrist[2] << "robotShouldToElbow[1] ::"<<robotElbowToWrist[0] << "robotShouldToElbow[2] ::"<<robotElbowToWrist[1] <<endl;
+	RShouldToElbow[0] = -robotShouldToElbow[2];
+	RShouldToElbow[1] = -robotShouldToElbow[0];
+	RShouldToElbow[2] = robotShouldToElbow[1];
+
+	//cout << "LShouldToElbow" << endl;
+	//cout <<LShouldToElbow[0]<< ", " << LShouldToElbow[1]<< ", " <<LShouldToElbow[2]<< ", " <<endl;
+	RElbowToWrist[0] = -robotElbowToWrist[2];
+	RElbowToWrist[1] = -robotElbowToWrist[0];
+	RElbowToWrist[2] = robotElbowToWrist[1];
+
+
+	WristTohand[0] = skel[11].Position.X - skel[10].Position.X;
+	WristTohand[1] = skel[11].Position.Y - skel[10].Position.Y;
+	WristTohand[2] = skel[11].Position.Z - skel[10].Position.Z;
+
+	WristToThumb[0] = skel[24].Position.X - skel[10].Position.X;
+	WristToThumb[1] = skel[24].Position.Y - skel[10].Position.Y;
+	WristToThumb[2] = skel[24].Position.Z - skel[10].Position.Z;
+
+	k2 =1;
+	k1 = -(WristToThumb[0]*ElbowToWrist[0] +WristToThumb[1]*ElbowToWrist[1]+ WristToThumb[2]*ElbowToWrist[2])/(WristTohand[0]*ElbowToWrist[0] +WristTohand[1]*ElbowToWrist[1]+ WristTohand[2]*ElbowToWrist[2]);
+
+	vertical[0] = k1* WristTohand[0] + k2 * WristToThumb[0];
+	vertical[1] = k1* WristTohand[1] + k2 * WristToThumb[1];
+	vertical[2] = k1* WristTohand[2] + k2 * WristToThumb[2];
+
+	referenceNormal = getCross(ElbowToWrist,yReference);
+
+	temp = acos((referenceNormal[0]*vertical[0]+referenceNormal[1]*vertical[1]+referenceNormal[2]*vertical[2]) / (sqrt(referenceNormal[0]*referenceNormal[0]+referenceNormal[1]*referenceNormal[1]+referenceNormal[2]*referenceNormal[2])*sqrt(vertical[0]*vertical[0]+vertical[1]*vertical[1]+vertical[2]*vertical[2])));
+	//referenceNormalCross = getCross(referenceNormal,vertical);
+
+	//tempSin =asin((referenceNormalCross[0]*referenceNormalCross[0] + referenceNormalCross[1]*referenceNormalCross[1] + referenceNormalCross[2]*referenceNormalCross[2]) /((referenceNormal[0]*referenceNormal[0] + referenceNormal[1]*referenceNormal[1] + referenceNormal[2]*referenceNormal[2])*(vertical[0]*vertical[0] + vertical[1]*vertical[1] + vertical[2]*vertical[2])));
+	//if(tempSin > 0){
+	//	RWristYaw = temp;
+	//}else{
+	//	RWristYaw = -temp;
+	//}
+	controlNao();
+	//calculAngle();
+	//cout << "robotElbowToWrist[0] :: " << -robotElbowToWrist[2] << "robotElbowToWrist[1] ::"<<-robotElbowToWrist[0] + 0.098 << "robotElbowToWrist[2] ::"<<robotElbowToWrist[1] + 0.1 <<endl;
+	/*resultPosition[0] = (robotShouldToElbow[0] + robotElbowToWrist[0] + naoTorsoToShoulder[0]) /  1000 ;
+	resultPosition[1] = (robotShouldToElbow[1] + robotElbowToWrist[1] + naoTorsoToShoulder[1]) /  1000 ;
+	resultPosition[2] = (robotShouldToElbow[2] + robotElbowToWrist[2] + naoTorsoToShoulder[2]) /  1000 ;
+	cout << "resultPosition[0] :: " << -resultPosition[2] << "resultPosition[1] ::"<<-resultPosition[0] + 0.098 << "resultPosition[2] ::"<<resultPosition[1] + 0.1 <<endl;*/
+	return 0;
+}
+
+void testWristYaw(){
+	
+	  AL::ALValue names       = AL::ALValue::array("LShoulderPitch", "LShoulderRoll","LElbowYaw","LElbowRoll","LWristYaw","RShoulderPitch", "RShoulderRoll","RElbowYaw","RElbowRoll","RWristYaw");
+	  AL::ALValue angles      = AL::ALValue::array(0.0f,0.0f,0.0f,0.0f,0.0f,0.0f,0.0f,0.0f,0.0f,-3.0f);
+	  float fractionMaxSpeed  = 0.55f;
+      motion.setStiffnesses(names, AL::ALValue::array(0.0f,0.0f,0.0f,0.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f));
+	 /* qi::os::sleep(1.0f);
+	  motion.setAngles(names, angles, fractionMaxSpeed);
+	  qi::os::sleep(1.0f);*/
+}
+int main(int argc, char **argv[])
+{
+
+	//OpenCV中开启CPU的硬件指令优化功能函数
+	motion.rest();
+
+	motion.wakeUp();
+	/*testWristYaw();
+
+	system("pause");*/
+
+	setUseOptimized(true);
+
+	// Sensor
+	IKinectSensor* pSensor;
+	HRESULT hResult = S_OK;
+	hResult = GetDefaultKinectSensor(&pSensor);
+	hResult = pSensor->Open();
+	if (FAILED(hResult)) {
+		std::cerr << "Error : IKinectSensor::Open()" << std::endl;
+		return -1;
+	}
+	//Source
+	IColorFrameSource* pColorSource;
+	hResult = pSensor->get_ColorFrameSource(&pColorSource);
+	if (FAILED(hResult)) {
+		std::cerr << "Error : IKinectSensor::get_ColorFrameSource()" << std::endl;
+		return -1;
+	}
+
+	IBodyFrameSource* pBodySource;
+	hResult = pSensor->get_BodyFrameSource(&pBodySource);
+	if (FAILED(hResult)) {
+		std::cerr << "Error : IKinectSensor::get_BodyFrameSource()" << std::endl;
+		return -1;
+	}
+
+	// Reader
+	IColorFrameReader* pColorReader;
+	hResult = pColorSource->OpenReader(&pColorReader);
+	if (FAILED(hResult)) {
+		std::cerr << "Error : IColorFrameSource::OpenReader()" << std::endl;
+		return -1;
+	}
+
+	IBodyFrameReader* pBodyReader;
+	hResult = pBodySource->OpenReader(&pBodyReader);
+	if (FAILED(hResult)) {
+		std::cerr << "Error : IBodyFrameSource::OpenReader()" << std::endl;
+		return -1;
+	}
+
+	// Description
+	IFrameDescription* pDescription;
+	hResult = pColorSource->get_FrameDescription(&pDescription);
+	if (FAILED(hResult)) {
+		std::cerr << "Error : IColorFrameSource::get_FrameDescription()" << std::endl;
+		return -1;
+	}
+
+	int width = 0;
+	int height = 0;
+	pDescription->get_Width(&width); // 1920
+	pDescription->get_Height(&height); // 1080
+	unsigned int bufferSize = width * height * 4 * sizeof(unsigned char);
+
+	cv::Mat bufferMat(height, width, CV_8UC4);
+	cv::Mat bodyMat(height / 2, width / 2, CV_8UC4);
+	cv::namedWindow("Body");
+
+	// Color Table
+	cv::Vec3b color[BODY_COUNT];
+	color[0] = cv::Vec3b(255, 0, 0);
+	color[1] = cv::Vec3b(0, 255, 0);
+	color[2] = cv::Vec3b(0, 0, 255);
+	color[3] = cv::Vec3b(255, 255, 0);
+	color[4] = cv::Vec3b(255, 0, 255);
+	color[5] = cv::Vec3b(0, 255, 255);
+
+	float Skeletons[6][25][3];
+	// Coordinate Mapper
+	ICoordinateMapper* pCoordinateMapper;
+	hResult = pSensor->get_CoordinateMapper(&pCoordinateMapper);
+	if (FAILED(hResult)) {
+		std::cerr << "Error : IKinectSensor::get_CoordinateMapper()" << std::endl;
+		return -1;
+	}
+
+
+	while (1) {
+		// Frame
+		IColorFrame* pColorFrame = nullptr;
+		hResult = pColorReader->AcquireLatestFrame(&pColorFrame);
+		if (SUCCEEDED(hResult)) {
+			hResult = pColorFrame->CopyConvertedFrameDataToArray(bufferSize, reinterpret_cast<BYTE*>(bufferMat.data), ColorImageFormat::ColorImageFormat_Bgra);
+			if (SUCCEEDED(hResult)) {
+				cv::resize(bufferMat, bodyMat, cv::Size(), 0.5, 0.5);
+			}
+
+		}
+
+		//更新骨骼帧
+		IBodyFrame* pBodyFrame = nullptr;
+		hResult = pBodyReader->AcquireLatestFrame(&pBodyFrame);
+		if (SUCCEEDED(hResult)) {
+			IBody* pBody[BODY_COUNT] = { 0 };
+			//更新骨骼数据
+			hResult = pBodyFrame->GetAndRefreshBodyData(BODY_COUNT, pBody);
+			if (SUCCEEDED(hResult)) {
+				for (int count = 0; count < BODY_COUNT; count++) {
+					BOOLEAN bTracked = false;
+					hResult = pBody[count]->get_IsTracked(&bTracked);
+					if (SUCCEEDED(hResult) && bTracked) {
+						Joint joint[JointType::JointType_Count];
+	/////////////////////////////					
+						hResult = pBody[count]->GetJoints(JointType::JointType_Count, joint);//joint 得到所有骨骼点的数据
+						if (SUCCEEDED(hResult)) {
+							// Left Hand State
+							HandState leftHandState = HandState::HandState_Unknown;
+							hResult = pBody[count]->get_HandLeftState(&leftHandState);
+							if (SUCCEEDED(hResult)) {
+								ColorSpacePoint colorSpacePoint = { 0 };
+								hResult = pCoordinateMapper->MapCameraPointToColorSpace(joint[JointType::JointType_HandLeft].Position, &colorSpacePoint);
+								if (SUCCEEDED(hResult)) {
+									int x = static_cast<int>(colorSpacePoint.X);
+									int y = static_cast<int>(colorSpacePoint.Y);
+
+
+									if ((x >= 0) && (x < width) && (y >= 0) && (y < height)) {
+										if (leftHandState == HandState::HandState_Open) {
+											cv::circle(bufferMat, cv::Point(x, y), 75, cv::Scalar(0, 128, 0), 5, CV_AA);
+
+										}
+										else if (leftHandState == HandState::HandState_Closed) {
+											cv::circle(bufferMat, cv::Point(x, y), 75, cv::Scalar(0, 0, 128), 5, CV_AA);
+										}
+										else if (leftHandState == HandState::HandState_Lasso) {
+											cv::circle(bufferMat, cv::Point(x, y), 75, cv::Scalar(128, 128, 0), 5, CV_AA);
+										}
+									}
+								}
+							}
+
+						HandState rightHandState = HandState::HandState_Unknown;
+                        ColorSpacePoint colorSpacePoint = { 0 };
+						hResult = pBody[count]->get_HandRightState(&rightHandState);
+							if (SUCCEEDED(hResult)) {
+								hResult = pCoordinateMapper->MapCameraPointToColorSpace(joint[JointType::JointType_HandRight].Position, &colorSpacePoint);
+								if (SUCCEEDED(hResult)) {
+									int x = static_cast<int>(colorSpacePoint.X);
+									int y = static_cast<int>(colorSpacePoint.Y);
+
+									if ((x >= 0) && (x < width) && (y >= 0) && (y < height)) {
+										if (rightHandState == HandState::HandState_Open) {
+											cv::circle(bufferMat, cv::Point(x, y), 75, cv::Scalar(0, 128, 0), 5, CV_AA);
+										}
+										else if (rightHandState == HandState::HandState_Closed) {
+											cv::circle(bufferMat, cv::Point(x, y), 75, cv::Scalar(0, 0, 128), 5, CV_AA);
+
+										}
+										else if (rightHandState == HandState::HandState_Lasso) {
+											cv::circle(bufferMat, cv::Point(x, y), 75, cv::Scalar(128, 128, 0), 5, CV_AA);
+										}
+									}
+								}
+							}
+							CvPoint skeletonPoint[BODY_COUNT][JointType_Count] = { cvPoint(0,0) };
+							// Joint
+							if(joint[0].Position.Z >2 && joint[0].Position.Z < 3){
+								getLeftHandPostion(joint);
+							}
+						
+							for (int type = 0; type < JointType::JointType_Count; type++) {
+								ColorSpacePoint colorSpacePoint = { 0 };
+								pCoordinateMapper->MapCameraPointToColorSpace(joint[type].Position, &colorSpacePoint);
+								int x = static_cast<int>(colorSpacePoint.X);
+								int y = static_cast<int>(colorSpacePoint.Y);
+								skeletonPoint[count][type].x = x;
+								skeletonPoint[count][type].y = y;
+								if ((x >= 0) && (x < width) && (y >= 0) && (y < height)) {
+									cv::circle(bufferMat, cv::Point(x, y), 5, static_cast< cv::Scalar >(color[count]), -1, CV_AA);
+								}
+							}
+							for (int i = 0; i < 25; i++) {
+								Skeletons[count][i][0] = joint[i].Position.X;
+								Skeletons[count][i][1] = joint[i].Position.Y;
+								Skeletons[count][i][2] = joint[i].Position.Z;
+							}
+								drawSkeleton(bufferMat, skeletonPoint[count], joint, count);			           		
+						}
+					}
+				}
+				cv::resize(bufferMat, bodyMat, cv::Size(), 0.5, 0.5);
+			}
+			for (int count = 0; count < BODY_COUNT; count++) {
+				SafeRelease(pBody[count]);
+			}
+		}
+		SafeRelease(pColorFrame);
+		SafeRelease(pBodyFrame);
+
+		waitKey(1);
+		cv::imshow("Body", bodyMat);
+
+	}
+
+
+	SafeRelease(pColorSource);
+	SafeRelease(pColorReader);
+	SafeRelease(pDescription);
+	SafeRelease(pBodySource);
+	// done with body frame reader
+	SafeRelease(pBodyReader);
+
+	SafeRelease(pDescription);
+	// done with coordinate mapper
+	SafeRelease(pCoordinateMapper);
+
+	if (pSensor) {
+		pSensor->Close();
+	}
+	SafeRelease(pSensor);
+
+	return 0;
+}
+
+
+void DrawBone(Mat& SkeletonImage, CvPoint pointSet[], const Joint* pJoints, int whichone, JointType joint0, JointType joint1)
+{
+	TrackingState joint0State = pJoints[joint0].TrackingState;
+	TrackingState joint1State = pJoints[joint1].TrackingState;
+
+	// If we can't find either of these joints, exit
+	if ((joint0State == TrackingState_NotTracked) || (joint1State == TrackingState_NotTracked))
+	{
+		return;
+	}
+
+	// Don't draw if both points are inferred
+	if ((joint0State == TrackingState_Inferred) && (joint1State == TrackingState_Inferred))
+	{
+		return;
+	}
+
+
+	CvScalar color;
+	switch (whichone) //跟踪不同的人显示不同的颜色   
+	{
+	case 0:
+		color = cvScalar(255);
+		break;
+	case 1:
+		color = cvScalar(0, 255);
+		break;
+	case 2:
+		color = cvScalar(0, 0, 255);
+		break;
+	case 3:
+		color = cvScalar(255, 255, 0);
+		break;
+	case 4:
+		color = cvScalar(255, 0, 255);
+		break;
+	case 5:
+		color = cvScalar(0, 255, 255);
+		break;
+	} 
+
+
+	// We assume all drawn bones are inferred unless BOTH joints are tracked
+	if ((joint0State == TrackingState_Tracked) && (joint1State == TrackingState_Tracked))
+	{
+		line(SkeletonImage, pointSet[joint0], pointSet[joint1], color, 2);
+	}
+	else
+	{
+		line(SkeletonImage, pointSet[joint0], pointSet[joint1], color, 2);
+	}
+}
+
+void drawSkeleton(Mat& SkeletonImage, CvPoint pointSet[], const Joint* pJoints, int whichone)
+{
+
+	// Draw the bones
+
+	// Torso
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_Head, JointType_Neck);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_Neck, JointType_SpineShoulder);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_SpineShoulder, JointType_SpineMid);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_SpineMid, JointType_SpineBase);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_SpineShoulder, JointType_ShoulderRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_SpineShoulder, JointType_ShoulderLeft);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_SpineBase, JointType_HipRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_SpineBase, JointType_HipLeft);
+
+	// Right Arm    
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_ShoulderRight, JointType_ElbowRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_ElbowRight, JointType_WristRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_WristRight, JointType_HandRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_HandRight, JointType_HandTipRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_WristRight, JointType_ThumbRight);
+
+	// Left Arm
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_ShoulderLeft, JointType_ElbowLeft);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_ElbowLeft, JointType_WristLeft);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_WristLeft, JointType_HandLeft);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_HandLeft, JointType_HandTipLeft);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_WristLeft, JointType_ThumbLeft);
+
+	// Right Leg
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_HipRight, JointType_KneeRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_KneeRight, JointType_AnkleRight);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_AnkleRight, JointType_FootRight);
+
+	// Left Leg
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_HipLeft, JointType_KneeLeft);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_KneeLeft, JointType_AnkleLeft);
+	DrawBone(SkeletonImage, pointSet, pJoints, whichone, JointType_AnkleLeft, JointType_FootLeft);
+}
+
